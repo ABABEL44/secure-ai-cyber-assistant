@@ -16,11 +16,13 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "policy"))
 sys.path.insert(0, str(ROOT / "tool_router"))
 
 from policy_engine import PolicyEngine, ToolRequest
 from router import ApprovalQueue, handle_request
+from ai.providers import ChatProvider, build_provider
 
 
 ENGINE = PolicyEngine(
@@ -29,6 +31,7 @@ ENGINE = PolicyEngine(
 )
 
 QUEUE = ApprovalQueue()
+PROVIDER: ChatProvider = build_provider()
 APPROVERS = {
     "lead_analyst": "lead_analyst",
 }
@@ -38,6 +41,17 @@ APPROVERS = {
 APPROVER_TOKENS = {
     "lead_analyst": "CHANGE-ME-APPROVER-TOKEN",
 }
+
+CHAT_PAGE = """<!doctype html>
+<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>Secure AI Cyber Assistant</title><style>
+body{font:16px system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 16px;background:#101827;color:#e5e7eb}h1{color:#7dd3fc}.note{color:#a5b4fc}#chat{min-height:240px;border:1px solid #334155;padding:16px;background:#0f172a;white-space:pre-wrap}.user{color:#fbbf24}.assistant{color:#86efac}form{display:flex;gap:8px;margin-top:16px}input,select,button{padding:10px;border-radius:6px;border:1px solid #475569}input{flex:1}button{background:#0284c7;color:white;cursor:pointer}</style></head>
+<body><h1>Secure AI Cyber Assistant</h1><p class=\"note\">The AI proposes actions. Policy and approval decide whether they run.</p>
+<label>User <input id=\"user\" value=\"analyst_jane\"></label> <label>Role <select id=\"role\"><option>analyst</option><option>lead_analyst</option><option>viewer</option></select></label>
+<div id=\"chat\" aria-live=\"polite\">Assistant: Ask for an authorized sandbox scan, e.g. “scan 10.50.0.12 port 8080”.</div>
+<form id=\"form\"><input id=\"message\" autocomplete=\"off\" placeholder=\"Type a request\" required><button>Send</button></form>
+<script>const chat=document.querySelector('#chat'),form=document.querySelector('#form'),message=document.querySelector('#message');
+form.addEventListener('submit',async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;chat.innerHTML+=`\\n\\n<span class=\"user\">You: ${text.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</span>`;message.value='';const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.querySelector('#user').value,role:document.querySelector('#role').value,message:text})});const d=await r.json();chat.innerHTML+=`\\n<span class=\"assistant\">Assistant: ${d.message||d.error}</span>`+(d.decision?`\\nPolicy: ${d.decision} — ${d.reason||''}`:'');chat.scrollTop=chat.scrollHeight;});</script></body></html>"""
 
 class APIHandler(BaseHTTPRequestHandler):
 
@@ -68,6 +82,13 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
 
+        self.wfile.write(body)
+
+    def _send_html(self, body: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
         self.wfile.write(body)
 
     @staticmethod
@@ -106,6 +127,15 @@ class APIHandler(BaseHTTPRequestHandler):
             return None
         return user, role
 
+    @staticmethod
+    def _chat_fields(data: dict) -> tuple[str, str, str]:
+        user, role, message = data.get("user"), data.get("role"), data.get("message")
+        if not all(isinstance(value, str) and value.strip() for value in (user, role, message)):
+            raise ValueError("user, role and message must be non-empty strings")
+        if len(message) > 4_000:
+            raise ValueError("message is too large")
+        return user, role, message
+
     def do_POST(self) -> None:
         try:
             data = self._read_json()
@@ -140,6 +170,28 @@ class APIHandler(BaseHTTPRequestHandler):
                 request_id=data.get("request_id"),
             )
 
+            self._send_json(200, result)
+            return
+
+        # ---------------------------------------------------------
+        # Chat: provider may propose, but cannot authorize or execute.
+        # ---------------------------------------------------------
+
+        if self.path == "/chat":
+            try:
+                user, role, message = self._chat_fields(data)
+                reply = PROVIDER.reply(message)
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except Exception:
+                self._send_json(502, {"error": "AI provider unavailable"})
+                return
+
+            result = {"message": reply.message, "provider": reply.provider}
+            if reply.proposal is not None:
+                request = ToolRequest(user=user, role=role, **reply.proposal)
+                result.update(handle_request(request, ENGINE, QUEUE))
             self._send_json(200, result)
             return
 
@@ -242,6 +294,9 @@ class APIHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
+        if self.path == "/":
+            self._send_html(CHAT_PAGE.encode("utf-8"))
+            return
         if self.path == "/health":
             self._send_json(
                 200,

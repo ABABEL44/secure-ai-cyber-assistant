@@ -49,6 +49,10 @@ ai/               Non-authorizing deterministic intent parser
    ```
    The API binds only to `127.0.0.1:8081`. The included approver token is a
    demo value and must be replaced by real authentication before deployment.
+   Open `http://127.0.0.1:8081` in a browser for the chat interface. Without
+   an API key it uses the safe deterministic parser. To enable the optional
+   OpenAI provider, set `OPENAI_API_KEY` in the server environment (and
+   optionally `OPENAI_MODEL`); the key is never sent to the browser.
 
 4. **Tear down** when done — sandbox containers are disposable:
    ```bash

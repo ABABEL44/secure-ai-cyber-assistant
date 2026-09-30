@@ -39,6 +39,17 @@ def test_unknown_endpoint_returns_404():
     assert body["error"] == "not_found"
 
 
+def test_chat_page_is_served():
+    connection = HTTPConnection("127.0.0.1", 8081, timeout=3)
+    connection.request("GET", "/")
+    response = connection.getresponse()
+    body = response.read().decode("utf-8")
+    connection.close()
+
+    assert response.status == 200
+    assert "Secure AI Cyber Assistant" in body
+
+
 def test_missing_request_body_returns_400():
     status, body = api_request("POST", "/tool-request")
 
@@ -79,6 +90,23 @@ def test_missing_tool_request_fields_returns_400():
 
     assert status == 400
     assert body["error"] == "invalid tool request"
+
+
+def test_chat_proposal_is_still_denied_when_out_of_scope():
+    status, body = api_request(
+        "POST",
+        "/chat",
+        {
+            "user": "analyst_jane",
+            "role": "analyst",
+            "message": "scan 8.8.8.8 port 443",
+        },
+    )
+
+    assert status == 200
+    assert body["provider"] == "deterministic"
+    assert body["decision"] == "deny"
+    assert body["output"] is None
 
 
 def test_unauthorized_approver_returns_403():

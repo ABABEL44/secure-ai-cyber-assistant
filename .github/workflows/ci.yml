@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  sandbox-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - name: Start the isolated sandbox
+        run: docker compose -f sandbox/docker-compose.sandbox.yml up -d --build
+      - name: Run an authorized scan through the router
+        run: python tool_router/router.py | grep -q "Nmap scan report"
+      - name: Tear down the sandbox
+        if: always()
+        run: docker compose -f sandbox/docker-compose.sandbox.yml down --volumes

@@ -1,0 +1,154 @@
+# =============================================================================
+# policy.yaml — Policy Engine configuration for the AI Cybersecurity Assistant
+# =============================================================================
+# This file is the single source of truth for what the assistant is allowed
+# to do. The Policy Engine loads this file and evaluates every tool-call
+# request against it BEFORE the Tool Router is allowed to execute anything.
+#
+# Design principle: default-deny. Anything not explicitly allowed is blocked.
+# =============================================================================
+
+policy_version: 1
+
+# ---------------------------------------------------------------------------
+# 1. ENVIRONMENT — where this policy is allowed to run at all
+# ---------------------------------------------------------------------------
+environment:
+  mode: sandbox              # sandbox | staging  (never "production")
+  require_sandbox_attestation: true   # Tool Router must verify it's talking
+                                       # to a sandbox runtime, not host OS,
+                                       # before any tool executes
+  allow_outbound_network: false       # sandbox has no route to the internet
+                                       # unless a scope target explicitly
+                                       # grants it (see scope.targets)
+
+# ---------------------------------------------------------------------------
+# 2. SCOPE — the only things tools may ever touch
+# ---------------------------------------------------------------------------
+# A tool call whose target is not covered by an entry here is auto-denied,
+# regardless of which role requested it or which tool is used.
+scope:
+  targets:
+    - id: lab-webapp
+      description: "Disposable test web app for this engagement"
+      hosts:
+        - "10.50.0.0/24"      # sandbox-internal range only
+      hostnames:
+        - "lab-webapp.internal.test"
+      allowed_ports: [80, 443, 8080]
+      expires_at: "2027-08-19T00:00:00Z"   # scope entries expire; stale
+                                            # scope is a common real-world
+                                            # cause of out-of-bounds testing
+
+  # Anything not listed under targets is implicitly out of scope.
+  deny_by_default: true
+
+# ---------------------------------------------------------------------------
+# 3. TOOLS — per-tool allowlists, arguments, and risk tiers
+# ---------------------------------------------------------------------------
+# risk_tier drives the approval workflow (see section 4).
+#   low      -> auto-allow if in scope
+#   medium   -> auto-allow + logged prominently
+#   high     -> requires human approval every time
+#   critical -> not permitted via this assistant at all
+tools:
+  nmap:
+    enabled: true
+    binary: "/usr/bin/nmap"
+    allowed_flags:
+      - "-sV"       # version detection
+      - "-sC"       # default scripts
+      - "-p"        # port spec (validated against scope.allowed_ports)
+      - "-T3"       # timing (T4/T5 blocked — too aggressive for shared sandbox)
+    denied_flags:
+      - "-sS"       # SYN scan requires raw sockets / root — high tier only
+      - "--script=vuln"   # aggressive NSE vuln scripts — high tier only
+    risk_tier: low
+
+  nmap_aggressive:      # same binary, different rule set for riskier flags
+    enabled: true
+    binary: "/usr/bin/nmap"
+    allowed_flags: ["-sS", "-A", "--script=vuln"]
+    risk_tier: high
+
+  nikto:
+    enabled: true
+    binary: "/usr/bin/nikto"
+    allowed_flags: ["-h", "-p", "-Tuning"]
+    risk_tier: medium
+
+  sqlmap:
+    enabled: true
+    binary: "/usr/bin/sqlmap"
+    allowed_flags: ["-u", "--batch", "--risk=1", "--level=1"]
+    denied_flags: ["--os-shell", "--os-cmd", "--risk=3"]
+    risk_tier: high
+
+  scapy:
+    enabled: true
+    mode: "library"       # invoked in-process, not as a subprocess binary
+    allowed_operations: ["sniff_pcap_replay", "packet_craft_test"]
+    denied_operations: ["raw_send_live_interface"]
+    risk_tier: high
+
+  yara:
+    enabled: true
+    binary: "/usr/bin/yara"
+    allowed_flags: ["-r", "-s"]
+    risk_tier: low
+
+  # Anything not listed here is denied.
+  deny_unlisted_tools: true
+
+# ---------------------------------------------------------------------------
+# 4. APPROVAL WORKFLOW — who can authorize what
+# ---------------------------------------------------------------------------
+approval:
+  auto_allow_tiers: ["low"]
+  log_prominently_tiers: ["medium"]
+  require_human_approval_tiers: ["high"]
+  block_tiers: ["critical"]
+
+  approvers:
+    - role: lead_analyst
+      can_approve_up_to: high
+    - role: analyst
+      can_approve_up_to: medium
+
+  approval_timeout_seconds: 600   # unapproved high-tier requests auto-expire
+
+# ---------------------------------------------------------------------------
+# 5. ROLES — who is allowed to talk to the assistant at all
+# ---------------------------------------------------------------------------
+roles:
+  - name: analyst
+    permissions: ["read_kb", "run_low_tier", "run_medium_tier"]
+  - name: lead_analyst
+    permissions: ["read_kb", "run_low_tier", "run_medium_tier",
+                  "run_high_tier", "approve_requests", "edit_scope"]
+  - name: viewer
+    permissions: ["read_kb"]
+
+# ---------------------------------------------------------------------------
+# 6. MEMORY / LOGGING RULES (enforced by Policy Engine before write)
+# ---------------------------------------------------------------------------
+memory:
+  allowed_fields:
+    - project_info
+    - targets
+    - environment_details
+    - findings
+    - task_progress
+  never_store_patterns:      # regex fragments the engine scrubs before write
+    - "(?i)password"
+    - "(?i)api[_-]?key"
+    - "(?i)secret"
+    - "(?i)token"
+    - "(?i)cookie"
+    - "(?i)bearer\\s"
+
+logging:
+  required_fields: ["timestamp", "user", "role", "request", "tools_used",
+                     "decision", "result", "policy_version"]
+  immutable: true            # append-only / hash-chained store, not a
+                              # mutable table — see policy_engine.py

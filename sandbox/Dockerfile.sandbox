@@ -1,0 +1,22 @@
+# =============================================================================
+# Dockerfile.sandbox
+# =============================================================================
+# This builds the "lab-webapp" target container — the disposable, deliberately
+# vulnerable host that the Tool Router's tool adapters are allowed to scan.
+# It is intentionally isolated: no outbound internet, no mounted host volumes,
+# no real credentials. This is what policy.yaml's scope.targets[lab-webapp]
+# entry (10.50.0.0/24) points at.
+# =============================================================================
+FROM python:3.11-slim
+
+# Minimal deliberately-exposed test service — NOT a real application.
+# Standing in for "the lab web app" from the policy scope example.
+RUN pip install --no-cache-dir flask
+
+WORKDIR /app
+COPY target_app.py /app/target_app.py
+
+# Only the ports listed in policy.yaml's allowed_ports for this target
+EXPOSE 8080
+
+CMD ["python3", "/app/target_app.py"]

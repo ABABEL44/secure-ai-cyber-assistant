@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CyberAssistantPolicy",
+  "type": "object",
+  "required": ["policy_version", "environment", "scope", "tools", "approval", "roles", "memory", "logging"],
+  "properties": {
+    "policy_version": { "type": "integer", "minimum": 1 },
+
+    "environment": {
+      "type": "object",
+      "required": ["mode", "require_sandbox_attestation"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["sandbox", "staging"] },
+        "require_sandbox_attestation": { "type": "boolean" },
+        "allow_outbound_network": { "type": "boolean" }
+      }
+    },
+
+    "scope": {
+      "type": "object",
+      "required": ["targets", "deny_by_default"],
+      "properties": {
+        "deny_by_default": { "type": "boolean", "const": true },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "hosts", "allowed_ports", "expires_at"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "hosts": { "type": "array", "items": { "type": "string" } },
+              "hostnames": { "type": "array", "items": { "type": "string" } },
+              "allowed_ports": { "type": "array", "items": { "type": "integer" } },
+              "expires_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+
+    "tools": {
+      "type": "object",
+      "required": ["deny_unlisted_tools"],
+      "properties": {
+        "deny_unlisted_tools": { "type": "boolean", "const": true }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["enabled", "risk_tier"],
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "binary": { "type": "string" },
+          "mode": { "type": "string" },
+          "allowed_flags": { "type": "array", "items": { "type": "string" } },
+          "denied_flags": { "type": "array", "items": { "type": "string" } },
+          "allowed_operations": { "type": "array", "items": { "type": "string" } },
+          "denied_operations": { "type": "array", "items": { "type": "string" } },
+          "risk_tier": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
+        }
+      }
+    },
+
+    "approval": {
+      "type": "object",
+      "required": ["auto_allow_tiers", "require_human_approval_tiers", "block_tiers", "approvers"],
+      "properties": {
+        "auto_allow_tiers": { "type": "array", "items": { "type": "string" } },
+        "log_prominently_tiers": { "type": "array", "items": { "type": "string" } },
+        "require_human_approval_tiers": { "type": "array", "items": { "type": "string" } },
+        "block_tiers": { "type": "array", "items": { "type": "string" } },
+        "approvers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "can_approve_up_to"],
+            "properties": {
+              "role": { "type": "string" },
+              "can_approve_up_to": { "type": "string", "enum": ["low", "medium", "high"] }
+            }
+          }
+        },
+        "approval_timeout_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "permissions"],
+        "properties": {
+          "name": { "type": "string" },
+          "permissions": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+
+    "memory": {
+      "type": "object",
+      "required": ["allowed_fields", "never_store_patterns"],
+      "properties": {
+        "allowed_fields": { "type": "array", "items": { "type": "string" } },
+        "never_store_patterns": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "logging": {
+      "type": "object",
+      "required": ["required_fields", "immutable"],
+      "properties": {
+        "required_fields": { "type": "array", "items": { "type": "string" } },
+        "immutable": { "type": "boolean", "const": true }
+      }
+    }
+  }
+}

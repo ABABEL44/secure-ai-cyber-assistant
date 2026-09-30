@@ -1,0 +1,19 @@
+# =============================================================================
+# Dockerfile.toolrunner
+# =============================================================================
+# This container is what the Tool Router actually shells out into. It has
+# Nmap installed and nothing else privileged. It sits on the same isolated
+# docker network as the target container and has NO route to the internet
+# or to the host's real network — see docker-compose.sandbox.yml.
+# =============================================================================
+FROM python:3.11-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nmap && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY nmap_adapter.py /app/nmap_adapter.py
+
+# No CMD — this container is invoked on-demand by the Tool Router via
+# `docker exec`, not run as a long-lived service.

@@ -1,0 +1,46 @@
+# =============================================================================
+# docker-compose.sandbox.yml
+# =============================================================================
+# Brings up the isolated sandbox: a target container and a tool-runner
+# container on a private bridge network with internal: true, meaning
+# Docker gives this network NO route out to the internet or the host's
+# real LAN. This is the physical enforcement behind policy.yaml's
+# environment.allow_outbound_network: false.
+#
+# Usage:
+#   docker compose -f docker-compose.sandbox.yml up -d --build
+# =============================================================================
+services:
+  lab-webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    container_name: lab-webapp
+    networks:
+      sandbox-net:
+        ipv4_address: 10.50.0.12
+    expose:
+      - "8080"
+    restart: "no"          # disposable — don't auto-restart across sessions
+
+  toolrunner:
+    build:
+      context: .
+      dockerfile: Dockerfile.toolrunner
+    container_name: toolrunner
+    networks:
+      sandbox-net:
+        ipv4_address: 10.50.0.20
+    depends_on:
+      - lab-webapp
+    # Kept alive so the Tool Router can `docker exec` into it on demand.
+    command: ["sleep", "infinity"]
+    restart: "no"
+
+networks:
+  sandbox-net:
+    driver: bridge
+    internal: true          # <-- no route to internet or host network
+    ipam:
+      config:
+        - subnet: 10.50.0.0/24
